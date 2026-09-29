@@ -259,7 +259,7 @@ const HomeCard: React.FC<{
 );
 
 const CheckPhone: React.FC = () => {
-    const { closeApp, characters, activeCharacterId, updateCharacter, apiConfig, apiPresets, addToast, userProfile, characterGroups } = useOS();
+    const { closeApp, characters, activeCharacterId, updateCharacter, apiConfig, apiPresets, getCharacterApiConfig, addToast, userProfile, characterGroups } = useOS();
     const [view, setView] = useState<'select' | 'phone'>('select');
     // activeAppId: 'home' | 'chat_detail' | 'app_id'
     const [activeAppId, setActiveAppId] = useState<string>('home');
@@ -272,8 +272,10 @@ const CheckPhone: React.FC = () => {
     const [phoneApiConfig, setPhoneApiConfigState] = useState<APIConfig | null>(() => getCheckPhoneApi());
     const [testingPhoneApi, setTestingPhoneApi] = useState(false);
     const [phoneApiTestResult, setPhoneApiTestResult] = useState<string | null>(null);
-    const effectiveApiConfig = resolveCheckPhoneApi(phoneApiConfig, apiConfig);
     const phoneApiFollowsDefault = !phoneApiConfig?.baseUrl;
+    const effectiveApiConfig = phoneApiFollowsDefault
+        ? getCharacterApiConfig(targetChar || undefined)
+        : resolveCheckPhoneApi(phoneApiConfig, apiConfig);
 
     // Detail State
     const [selectedChatRecord, setSelectedChatRecord] = useState<PhoneEvidence | null>(null);

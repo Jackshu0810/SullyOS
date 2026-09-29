@@ -8,8 +8,9 @@
  * Used by both the main chat flow (hooks/useChatAI.ts) and the proactive
  * message flow (context/OSContext.tsx) so the prompt stays in one place.
  *
- * The caller is responsible for the showThinkingChain gate and for
- * appending any user-supplied thinkingChainCustomPrompt.
+ * Callers apply the showThinkingChain gate, then independently apply the
+ * thinkingPromptEnabled gate before injecting this built-in guidance. Any
+ * user-supplied thinkingChainCustomPrompt is appended separately.
  */
 export function buildThinkingChainPrompt(charName: string, userName: string): string {
     return `═══════════════════════════════════════════

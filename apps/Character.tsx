@@ -99,7 +99,7 @@ const CharacterCard: React.FC<{
 );
 
 const Character: React.FC = () => {
-  const { closeApp, openApp, characters, activeCharacterId, setActiveCharacterId, addCharacter, updateCharacter, deleteCharacter, characterGroups, createCharacterGroup, renameCharacterGroup, deleteCharacterGroup, apiConfig, addToast, userProfile, worldbooks, addWorldbook } = useOS();
+  const { closeApp, openApp, characters, activeCharacterId, setActiveCharacterId, addCharacter, updateCharacter, deleteCharacter, characterGroups, createCharacterGroup, renameCharacterGroup, deleteCharacterGroup, apiConfig, apiPresets, addToast, userProfile, worldbooks, addWorldbook } = useOS();
   const launchIntent = characterLaunch.peek();
   const [view, setView] = useState<'list' | 'detail'>(() => launchIntent ? 'detail' : 'list');
   const [charPage, setCharPage] = useState(0); // 角色列表分页（每页 6 个，仅未建分组时）
@@ -1448,8 +1448,27 @@ ${isInitialGeneration ? `
                            </div>
 
                            <div>
+                               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">角色专属 API</label>
+                               <select
+                                   value={formData.apiPresetId || ''}
+                                   onChange={e => handleChange('apiPresetId', e.target.value || undefined)}
+                                   className="w-full bg-white rounded-2xl px-4 py-3 text-sm shadow-sm outline-none focus:ring-1 focus:ring-primary/20"
+                               >
+                                   <option value="">跟随全局 API</option>
+                                   {apiPresets.map(preset => <option key={preset.id} value={preset.id}>{preset.name} · {preset.config.model || '未设置模型'}</option>)}
+                               </select>
+                               <p className="text-[11px] text-slate-400 mt-2">选择全局设置中保存的 API 预设。绑定只覆盖主模型接口；识图和语音服务继续使用全局配置。预设被删除后自动回退全局 API。</p>
+                           </div>
+
+                           <div>
                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">核心指令 (System Prompt)</label>
                                <textarea value={formData.systemPrompt} onChange={(e) => handleChange('systemPrompt', e.target.value)} className="w-full h-40 bg-white rounded-3xl p-5 text-sm shadow-sm resize-none focus:ring-1 focus:ring-primary/20 transition-all vr-reader-scroll" placeholder="设定..." />
+                           </div>
+
+                           <div>
+                               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">新聊天开场白</label>
+                               <p className="text-[11px] text-slate-400 mb-2">清空聊天后重新开始时，先显示这条开场白，再由角色继续回复。</p>
+                               <textarea value={formData.chatOpening || ''} onChange={(e) => handleChange('chatOpening', e.target.value)} className="w-full h-24 bg-white rounded-3xl p-5 text-sm shadow-sm resize-none focus:ring-1 focus:ring-primary/20 transition-all vr-reader-scroll" placeholder="例如：好久不见，今天想和你聊聊最近发生的事。" />
                            </div>
 
                            <div>

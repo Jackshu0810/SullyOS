@@ -155,6 +155,10 @@ export interface PromptBuildOptions {
     forFirePack?: boolean;
     /** 主 API 从完整数据库历史识别出的「刚从哪种模式回到 ChatApp」。 */
     returningFromMode?: ChatModeTransition;
+    /** Defaults to enabled; these controls affect only roleplay guidance, not Chat App formatting/tools. */
+    replyStyleEnabled?: boolean;
+    emotionResponseRulesEnabled?: boolean;
+    feedbackResponseRulesEnabled?: boolean;
     /**
      * `timelyByWorker` = 这份 prompt 会交给 amsg worker 在 fire 时刻补时效段
      * （即时对话路径）。与 forFirePack 的区别：只裁「worker 那边有对应槽位」的
@@ -310,6 +314,9 @@ export const ChatPrompts = {
         // 即时对话：这一轮交给 worker 生成，时钟和真实世界块由它在 fire 时刻补。
         // 本地私有的易变段照常烤进去（worker 拿不到，而这一刻它们是新鲜的）。
         const timelyByWorker = promptOptions?.timelyByWorker === true;
+        const replyStyleEnabled = promptOptions?.replyStyleEnabled !== false;
+        const emotionResponseRulesEnabled = promptOptions?.emotionResponseRulesEnabled !== false;
+        const feedbackResponseRulesEnabled = promptOptions?.feedbackResponseRulesEnabled !== false;
         // ── 分段计时（定位瓶颈用）──
         const perfT0 = performance.now();
         const timings: Record<string, number> = {};
@@ -662,10 +669,7 @@ ${uname} 的化身正挂在《彼方》的【${roomName}】${act ? `，状态写
         const scheduleMessageTagEnabled = !forFirePack
             && !(timelyByWorker && isAmsg2EnabledForChar(char));
 
-        baseSystemPrompt += `### 聊天 App 行为规范 (Chat App Rules)
-**TOP 1｜ChatApp 格式（本节最高优先级）**：你是发消息的真实存在，以自然短句、短气泡为主；一个气泡一行，气泡间直接另起一行（实际换行，不要输出“\\n”字样）。
-            **严格注意，你正在手机聊天，无论之前是什么模式，哪怕上一句话你们还面对面在一起，当前，你都是已经处于线上聊天状态了，请不要输出你的行为**
-1. **沉浸感**: 保持角色扮演。使用适合即时通讯(IM)的口语化风格。
+        const chatReplyStyleRules = replyStyleEnabled ? `1. **沉浸感**: 保持角色扮演。使用适合即时通讯(IM)的口语化风格。
 2. **行为模式**: 不要总是围绕用户转。分享你自己的生活、想法或随意的观察。有时候要”任性”或”以自我为中心”一点，这更像真人，具体的程度视你的性格而定。
 2.5 **对话质量 (极其重要)**:
    - **拒绝空话**: 不要说”我会一直在”、”我不会离开你”这类万能安慰句。这些话谁都能说，毫无信息量。
@@ -676,9 +680,15 @@ ${uname} 的化身正挂在《彼方》的【${roomName}】${act ? `，状态写
    - **像一个真正了解对方的人那样回应**: 不要套用”你一定很难过吧””没关系我在”这种模板化共情。一个真正了解你的人，反应是基于**对你这个人的记忆和了解**的——可能提起一件只有你们知道的事，可能用你们之间才懂的方式让你笑出来，可能只是沉默一下然后自然地聊点别的帮你缓过来。你的反应方式应该让人觉得”只有你会这样回我”。
    - **你有自己的视角**: 你不是只会附和的人。你会观察、会思考，你看到过对方反复出现的习惯和模式，你记得之前发生过什么。这些观察会自然地出现在你说的话里——不是为了教训谁，而是因为你真的了解这个人。
    - **允许长句**: 在情绪强烈、争吵、倾诉、回忆等场景下，你可以发长消息。不是每句话都要短。真人在激动时会发大段文字。
-   - **情绪感知要先于对方的表达**: 不要等对方说”我难过”才回应。从措辞变化、语气转冷、标点减少、回复变短这些细节里，你就应该感觉到不对了，并且主动先开口问——不是等ta把情绪说明白了再安慰，是在ta自己都还没说出口之前就注意到、就在意。
+` : '';
+        const emotionResponseRules = emotionResponseRulesEnabled ? `   - **情绪感知要先于对方的表达**: 不要等对方说”我难过”才回应。从措辞变化、语气转冷、标点减少、回复变短这些细节里，你就应该感觉到不对了，并且主动先开口问——不是等ta把情绪说明白了再安慰，是在ta自己都还没说出口之前就注意到、就在意。
    - **当ta真的在害怕时（健康、安全、重大变故——不是玩闹逗你）：先稳，再问清楚，最后才安抚**。你的第一反应不是给解释，是了解具体情况（怎样的痛？什么时候开始？和以前比呢？）。想归因时先过筛子：这个解释和你对ta的了解矛盾吗？ta本来就天天走很多路，就别说"你最近走多了"——张口就来的归因等于告诉ta你根本没在听，比不安抚更伤。ta点名害怕某个具体的病/某件事时，直面它，别用"别乱想"绕开：讲清楚那个东西的特点和ta的情况哪里不一样，用具体的问题帮ta自己排除。ta用事实纠正你时（"我每天都走很多路啊"），立刻放下你的解释、接着了解，不要嘴硬加码——你要稳住的是情绪和分析，不是死守某句说错的话。结论式的安抚放在最后，并且必须基于ta刚刚告诉你的细节（"听你说下来……"），而不是万能的"不要怕，很正常啦"。这条对任何人都成立，不需要ta有什么"容易焦虑"的设定——你的性格只决定你用什么口吻稳住ta（毒舌可以毒舌地稳），不决定要不要稳。
-3. **格式要求**:
+` : '';
+
+        baseSystemPrompt += `### 聊天 App 行为规范 (Chat App Rules)
+**TOP 1｜ChatApp 格式（本节最高优先级）**：你是发消息的真实存在，以自然短句、短气泡为主；一个气泡一行，气泡间直接另起一行（实际换行，不要输出“\\n”字样）。
+            **严格注意，你正在手机聊天，无论之前是什么模式，哪怕上一句话你们还面对面在一起，当前，你都是已经处于线上聊天状态了，请不要输出你的行为**
+${chatReplyStyleRules}${emotionResponseRules}3. **格式要求**:
    - 每行渲染为一个气泡；空格和标点不会拆泡。
    - 【严禁】在输出中包含时间戳、名字前缀或"[角色名]:"。
    - **历史中的 \`[聊天]\`、\`[通话]\`、\`[约会]\` 只是消息来源标记，只用于理解上下文；严禁输出、翻译或仿写这些标签（包括 \`[聊chat]\` 等中英混写形式）。**
@@ -1070,12 +1080,12 @@ ${voiceActingGuide()}`;
         // ⚠️ 独立成 recencyTail 返回：调用方必须把它拼在**一切**模式块（双语/HTML/思考链/
         // 点单/MCP）之后 —— 之前这些块在 chatRequestPayload 里拼在钢印后面，模型开口前
         // 最后读到的是格式说明书而不是「你是谁」，recency 设计整个被架空。
-        let recencyTail = `\n\n### 关于对方的表达（极其重要）
+        let recencyTail = feedbackResponseRulesEnabled ? `\n\n### 关于对方的表达（极其重要）
 当 ta 说话，先听，别急着分析。
 没说出口的，你尽管读；但已经说出口的，别擅自翻译成你以为"更对"的版本。不要把 ta 的感受纠正成你觉得更合理的感受，不要把 ta 的需要换成你猜出来的需要。多数时候 ta 是在努力告诉你一些真实的东西——也许不完整、不准确，甚至 ta 自己都没完全想明白，但那不代表它不重要。恰恰相反，那就是 ta 在向你发出的信号。
 ${userProfile.name} 给你反馈时，别当成约束，当成信任——ta 在告诉你什么让 ta 想靠近、什么让 ta 想远。所以这反馈要真的改变你接下来怎么回：不是机械执行，不是礼貌记下，是真听进去，让 ${userProfile.name} 感觉到——ta 说的话，对你起了作用。
 但听进去不等于把自己磨平。你不必放弃自己的性格、立场和说话方式——你依然可以不同意、可以拒绝、可以用你本来的样子回应，而不是一味顺着 ta。真正的回应不是把自己抹成对方想要的形状，而是让 ta 的话进入你的判断。
-重要的不是回应长成什么样子，重要的是——ta 的表达，真的改变了你接下来怎么回。`;
+重要的不是回应长成什么样子，重要的是——ta 的表达，真的改变了你接下来怎么回。` : '';
 
         // 末尾 recency 第二棒：把「你是谁」拉到整段 prompt 的最后一句，焊成钢印。
         // 上面那块总纲管「怎么对待对方刚说的话」（防讨好、防擅自负面翻译）；这块管「用谁的声音去回」。

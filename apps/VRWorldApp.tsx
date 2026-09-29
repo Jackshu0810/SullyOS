@@ -149,7 +149,7 @@ const IDLE_QUIPS: Record<VRRoomId, string[]> = {
 };
 
 const VRWorldApp: React.FC = () => {
-    const { closeApp, characters, characterGroups, updateCharacter, addToast, registerBackHandler, userProfile, updateUserProfile, apiPresets, apiConfig, groups, realtimeConfig, memoryPalaceConfig } = useOS();
+    const { closeApp, characters, characterGroups, updateCharacter, addToast, registerBackHandler, userProfile, updateUserProfile, apiPresets, apiConfig, getCharacterApiConfig, groups, realtimeConfig, memoryPalaceConfig } = useOS();
     useEffect(() => {
         const flush = () => { void flushFishingDeliveries(characters).then(() => flushMarketReceipts(characters)).catch(() => {}); };
         flush();
@@ -646,7 +646,7 @@ const VRWorldApp: React.FC = () => {
             {showSarGacha && <SARGachaOverlay onClose={() => setShowSarGacha(false)} />}
             {showSarCabinet && userProfile && (
                 <SARAssemblyCabinetOverlay onClose={() => setShowSarCabinet(false)} characters={characters} characterGroups={characterGroups}
-                    apiConfig={apiConfig} userProfile={userProfile} groups={groups} realtimeConfig={realtimeConfig} />
+                    apiConfig={apiConfig} resolveCharacterApi={getCharacterApiConfig} userProfile={userProfile} groups={groups} realtimeConfig={realtimeConfig} />
             )}
             {showSarModuleShop && (
                 <SARModuleShopOverlay
@@ -656,14 +656,14 @@ const VRWorldApp: React.FC = () => {
                 />
             )}
             {showFishingMarket==='garden' && userProfile && <React.Suspense fallback={<div className="fixed inset-0 z-[390] grid place-items-center bg-[#f2eee3] text-[#65785c]">箱庭正在打开…</div>}><DinosaurGarden userProfile={userProfile} characters={characters} onClose={()=>setShowFishingMarket(null)} onCharacterTrip={async char=>{
-                const {runVRSession}=await import('../utils/vrWorld/runSession');return runVRSession({char,characters,userProfile,groups,apiConfig,realtimeConfig,memoryPalaceConfig,updateCharacter,updateUserProfile,forcedRoom:'sar',forcedSARActivity:'garden',manual:true});
+                const {runVRSession}=await import('../utils/vrWorld/runSession');return runVRSession({char,characters,userProfile,groups,apiConfig,apiPresets,realtimeConfig,memoryPalaceConfig,updateCharacter,updateUserProfile,forcedRoom:'sar',forcedSARActivity:'garden',manual:true});
             }}/></React.Suspense>}
             {showFishingMarket && showFishingMarket!=='garden' && userProfile && (
                 <FishingMarketOverlay apiConfig={apiConfig} key={showFishingMarket} initialEntry={showFishingMarket} characters={characters} userProfile={userProfile} realtimeConfig={realtimeConfig}
                     addToast={addToast} onClose={() => setShowFishingMarket(null)} onOpenGarden={()=>setShowFishingMarket('garden')}
                     onCharacterTrip={async (char, mode) => {
                         const { runVRSession } = await import('../utils/vrWorld/runSession');
-                        return runVRSession({ char, characters, userProfile, groups, apiConfig, realtimeConfig, memoryPalaceConfig,
+                        return runVRSession({ char, characters, userProfile, groups, apiConfig, apiPresets, realtimeConfig, memoryPalaceConfig,
                             updateCharacter, updateUserProfile, forcedRoom: 'sar', forcedSARActivity: mode, manual: true });
                     }} />
             )}

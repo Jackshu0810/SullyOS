@@ -49,6 +49,7 @@ import { isAnalyticsRequestUrl, trackEvent, shouldReportSnapshot, trackDataScale
 import { loadChatInputPreferences, saveChatInputPreferences } from '../utils/chatInputPreferences';
 import { collectAppearance, collectCharSettings, collectDataScale, collectFeatureFlagsAsync, collectSARFeatureFlags } from '../utils/analyticsSnapshot';
 import { normalizeApiConfig, normalizeApiPreset } from '../utils/apiConfigNormalize';
+import { resolveCharacterApiConfig } from '../utils/characterApi';
 import { getCheckPhoneApi, setCheckPhoneApi } from '../utils/checkPhoneApi';
 import { markBackupDone } from '../utils/backupReminder';
 import { collectSARLocalBackup, restoreSARLocalBackup } from '../utils/vrWorld/sarBackup';
@@ -337,6 +338,7 @@ interface OSContextType {
   virtualTime: VirtualTime;
   apiConfig: APIConfig;
   updateApiConfig: (updates: Partial<APIConfig>) => void;
+  getCharacterApiConfig: (character?: CharacterProfile) => APIConfig;
   isLocked: boolean;
   unlock: () => void;
   isDataLoaded: boolean;
@@ -2222,6 +2224,8 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   }, [characters]);
   const apiConfigRef = useRef(apiConfig);
   apiConfigRef.current = apiConfig;
+  const apiPresetsRef = useRef(apiPresets);
+  apiPresetsRef.current = apiPresets;
 
   // Keep the MiniMax endpoint module in sync with the user's region choice
   // so every minimaxFetch() call reads the latest preference.
@@ -2309,7 +2313,8 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           // Determine which API to use
           const pCfg = char.proactiveConfig;
           const useSecondary = pCfg?.useSecondaryApi && pCfg.secondaryApi?.baseUrl;
-          const api = useSecondary ? pCfg!.secondaryApi! : currentApiConfig;
+          const characterApi = resolveCharacterApiConfig(char, currentApiConfig, apiPresetsRef.current);
+          const api = useSecondary ? pCfg!.secondaryApi! : characterApi;
           if (!api.baseUrl) {
               drainQueuedProactive();
               return;
@@ -2396,7 +2401,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                   // translationConfig / mcdMiniSnap 是 chat-app 会话级 UI 状态，主动消息触发时
                   // 不存在；保持 undefined 即可，与"用户当时根本没在 chat 界面"的语义一致
                   htmlMode: { enabled: !!(char as any).htmlModeEnabled, customPrompt: (char as any).htmlModeCustomPrompt },
-                  thinkingChain: { enabled: !!(char as any).showThinkingChain, customPrompt: (char as any).thinkingChainCustomPrompt },
+                  thinkingChain: { enabled: !!(char as any).showThinkingChain, promptEnabled: char.thinkingPromptEnabled !== false, customPrompt: (char as any).thinkingChainCustomPrompt },
                   visionApiConfig: currentApiConfig.visionApi,
               });
               const systemPrompt = payload.systemPrompt;
@@ -2408,7 +2413,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               if (!payload.flags.promptBuildSkipped && !isEmotionEvalSkipped() && isScheduleFeatureOn(char) && char.emotionConfig?.enabled) {
                   const emotionApi = (char.emotionConfig.api?.baseUrl)
                       ? char.emotionConfig.api
-                      : { baseUrl: apiConfigRef.current.baseUrl, apiKey: apiConfigRef.current.apiKey, model: apiConfigRef.current.model };
+                      : { baseUrl: characterApi.baseUrl, apiKey: characterApi.apiKey, model: characterApi.model };
                   if (emotionApi.baseUrl && currentUserProfile) {
                       evaluateEmotionBackground(char, currentUserProfile, systemPrompt, apiMessages, emotionApi)
                           .then((innerState) => {
@@ -2700,6 +2705,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                   char,
                   characters: charactersRef.current,
                   apiConfig: apiConfigRef.current,
+                  apiPresets: apiPresetsRef.current,
                   userProfile: userProfileRef.current,
                   groups: groupsRef.current,
                    realtimeConfig: realtimeConfigRef.current,
@@ -2755,6 +2761,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                   world,
                   characters: charactersRef.current,
                   apiConfig: apiConfigRef.current,
+                  apiPresets: apiPresetsRef.current,
                   userProfile: userProfileRef.current,
                   groups: groupsRef.current,
                   realtimeConfig: realtimeConfigRef.current,
@@ -2778,6 +2785,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                   world,
                   characters: charactersRef.current,
                   apiConfig: apiConfigRef.current,
+                  apiPresets: apiPresetsRef.current,
                   userProfile: userProfileRef.current,
                   groups: groupsRef.current,
                   realtimeConfig: realtimeConfigRef.current,
@@ -3120,6 +3128,9 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }
   };
   const updateApiConfig = (updates: Partial<APIConfig>) => { const newConfig = normalizeApiConfig({ ...apiConfig, ...updates }); setApiConfig(newConfig); localStorage.setItem('os_api_config', JSON.stringify(newConfig)); };
+  const getCharacterApiConfig = useCallback((character?: CharacterProfile) => (
+      resolveCharacterApiConfig(character, apiConfig, apiPresets)
+  ), [apiConfig, apiPresets]);
   const updateRealtimeConfig = (updates: Partial<RealtimeConfig>) => { const newConfig = { ...realtimeConfig, ...updates }; setRealtimeConfig(newConfig); localStorage.setItem('os_realtime_config', JSON.stringify(newConfig)); };
 
   // Cloud Backup functions
@@ -5477,6 +5488,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     virtualTime,
     apiConfig,
     updateApiConfig,
+    getCharacterApiConfig,
     isLocked,
     unlock,
     isDataLoaded,

@@ -481,7 +481,7 @@ const GroupMessageItem = React.memo(({
 // --- Main Component ---
 
 const GroupChat: React.FC = () => {
-    const { closeApp, groups, createGroup, updateGroup, deleteGroup, characters, apiConfig, addToast, userProfile, virtualTime, characterGroups, theme: osTheme, customThemes, realtimeConfig } = useOS();
+    const { closeApp, groups, createGroup, updateGroup, deleteGroup, characters, apiConfig, getCharacterApiConfig, addToast, userProfile, virtualTime, characterGroups, theme: osTheme, customThemes, realtimeConfig } = useOS();
     const [view, setView] = useState<'list' | 'chat'>('list');
     const [activeGroup, setActiveGroup] = useState<GroupProfile | null>(null);
     const [messages, setMessages] = useState<Message[]>([]);
@@ -535,7 +535,7 @@ const GroupChat: React.FC = () => {
     // UI State — 面板状态对齐私聊 ChatInputArea 的 showPanel 约定
     const [showPanel, setShowPanel] = useState<'none' | 'actions' | 'emojis' | 'chars'>('none');
     const [activeEmojiCategory, setActiveEmojiCategory] = useState('default');
-    const [modalType, setModalType] = useState<'none' | 'create' | 'settings' | 'transfer' | 'member_select' | 'message-options' | 'edit-message' | 'packet-detail' | 'chrome-css' | 'chrome-sound' | 'html-prompt' | 'help'>('none');
+    const [modalType, setModalType] = useState<'none' | 'create' | 'settings' | 'transfer' | 'member_select' | 'message-options' | 'edit-message' | 'packet-detail' | 'chrome-css' | 'chrome-sound' | 'html-prompt' | 'help' | 'round-order' | 'prompt-preview'>('none');
     const [tempHtmlPrompt, setTempHtmlPrompt] = useState('');
     const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
     const [replyTarget, setReplyTarget] = useState<Message | null>(null);
@@ -574,6 +574,12 @@ const GroupChat: React.FC = () => {
     const [tempPrivateContextCap, setTempPrivateContextCap] = useState<number>(80);
     const [tempMemberTimelineCap, setTempMemberTimelineCap] = useState<number>(DEFAULT_MEMBER_TIMELINE_CAP);
     const [tempReplyMode, setTempReplyMode] = useState<'director' | 'roundRobin'>('director');
+    const [tempRoundRobinOrder, setTempRoundRobinOrder] = useState<string[]>([]);
+    const [tempRoundRobinQuickEntryEnabled, setTempRoundRobinQuickEntryEnabled] = useState(true);
+    const [promptPreviewMode, setPromptPreviewMode] = useState<'director' | 'roundRobin'>('director');
+    const [promptPreviewCharId, setPromptPreviewCharId] = useState('');
+    const [promptPreviewText, setPromptPreviewText] = useState('');
+    const [promptPreviewLoading, setPromptPreviewLoading] = useState(false);
     const [tempMemberBubbleIndependent, setTempMemberBubbleIndependent] = useState(false);
     const [tempUserBubbleThemeId, setTempUserBubbleThemeId] = useState<string>('');
     const [selectedMembers, setSelectedMembers] = useState<Set<string>>(new Set());
@@ -798,6 +804,105 @@ const GroupChat: React.FC = () => {
     };
 
     // --- Logic: Group Management ---
+
+    const resolveRoundRobinIds = (group: GroupProfile): string[] => {
+        const valid = new Set(group.members);
+        const configured = (group.roundRobinOrder || []).filter(id => valid.has(id));
+        const existingOrder = characters.filter(character => valid.has(character.id)).map(character => character.id);
+        const fallbackOrder = [...existingOrder, ...group.members.filter(id => !existingOrder.includes(id))];
+        return [...configured, ...fallbackOrder.filter(id => !configured.includes(id))];
+    };
+
+    const openRoundOrderEditor = () => {
+        if (!activeGroup) return;
+        setTempRoundRobinOrder(resolveRoundRobinIds(activeGroup));
+        setTempRoundRobinQuickEntryEnabled(activeGroup.roundRobinQuickEntryEnabled !== false);
+        setModalType('round-order');
+    };
+
+    const moveRoundRobinMember = (index: number, offset: -1 | 1) => {
+        setTempRoundRobinOrder(current => {
+            const nextIndex = index + offset;
+            if (nextIndex < 0 || nextIndex >= current.length) return current;
+            const next = [...current];
+            [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+            return next;
+        });
+    };
+
+    const saveRoundRobinOrder = async () => {
+        if (!activeGroup) return;
+        const validIds = resolveRoundRobinIds(activeGroup);
+        const nextOrder = [...tempRoundRobinOrder.filter(id => validIds.includes(id)), ...validIds.filter(id => !tempRoundRobinOrder.includes(id))];
+        const updates = {
+            roundRobinOrder: nextOrder,
+            roundRobinQuickEntryEnabled: tempRoundRobinQuickEntryEnabled,
+        };
+        await updateGroup(activeGroup.id, updates);
+        setActiveGroup({ ...activeGroup, ...updates });
+        setModalType('none');
+        addToast('轮询发言顺序已保存', 'success');
+    };
+
+    const openPromptPreview = () => {
+        if (!activeGroup) return;
+        setPromptPreviewMode(tempReplyMode);
+        const ids = resolveRoundRobinIds(activeGroup);
+        setPromptPreviewCharId(ids[0] || activeGroup.members[0] || '');
+        setPromptPreviewText('');
+        setPromptPreviewLoading(true);
+        setModalType('prompt-preview');
+    };
+
+    useEffect(() => {
+        if (modalType !== 'prompt-preview' || !activeGroup) return;
+        let cancelled = false;
+        const buildPreview = async () => {
+            setPromptPreviewLoading(true);
+            try {
+                const groupMembers = promptPreviewMode === 'roundRobin'
+                    ? resolveRoundRobinIds(activeGroup).map(id => characters.find(character => character.id === id)).filter(Boolean) as CharacterProfile[]
+                    : characters.filter(c => activeGroup.members.includes(c.id));
+                const previewMembers = promptPreviewMode === 'director'
+                    ? groupMembers
+                    : groupMembers.filter(member => member.id === promptPreviewCharId).slice(0, 1);
+                const { header, sharedScene } = buildGroupSystemHeader(messages, groupMembers);
+                let memberContext = '';
+                for (const member of previewMembers) {
+                    // 只读预览角色档案与时间线，不触发记忆宫殿注入或任何模型请求。
+                    memberContext += await buildMemberBlock(member, messages, sharedScene, false);
+                }
+                const liveHistory = messages
+                    .filter(message => message.id > (activeGroup.archivedThroughMessageId || 0))
+                    .slice(-contextLimit);
+                const history = buildGroupHistoryBlock(liveHistory, characters, emojis, userProfile.name, 3, {
+                    useVisionDescriptions: apiConfig.visionApi?.enabled === true,
+                });
+                const emojiContext = buildEmojiContextStr(emojis, categories, activeGroup.members);
+                const htmlPromptExt = activeGroup.htmlModeEnabled
+                    ? promptPreviewMode === 'director'
+                        ? `\n\n【群聊 HTML 适配】[html]...[/html] 块要写在某个角色自己的 content 字符串内部；HTML 属性一律用单引号（如 <div style='...'>），避免破坏外层 JSON。\n${buildHtmlPrompt(activeGroup.htmlModeCustomPrompt)}`
+                        : `\n\n${buildHtmlPrompt(activeGroup.htmlModeCustomPrompt)}`
+                    : '';
+                const taskInstruction = promptPreviewMode === 'director'
+                    ? buildDirectorInstruction({ ...history, text: '（见下方独立消息历史）' }, emojiContext)
+                    : buildRoundRobinInstruction(
+                        previewMembers[0]?.name || '请选择角色',
+                        { ...history, text: '（见下方独立消息历史）' },
+                        emojiContext,
+                    );
+                const prompt = `${header}${memberContext}\n\n${taskInstruction}${htmlPromptExt}\n`;
+                if (!cancelled) setPromptPreviewText(prompt);
+            } catch (error) {
+                console.error('[GroupChat] prompt preview failed:', error);
+                if (!cancelled) setPromptPreviewText('提示词预览生成失败，请关闭后重试。');
+            } finally {
+                if (!cancelled) setPromptPreviewLoading(false);
+            }
+        };
+        void buildPreview();
+        return () => { cancelled = true; };
+    }, [modalType, activeGroup, messages, characters, emojis, categories, contextLimit, userProfile, apiConfig.visionApi, promptPreviewMode, promptPreviewCharId]);
 
     const handleCreateGroup = () => {
         if (!tempGroupName.trim() || selectedMembers.size < 2) {
@@ -1138,6 +1243,7 @@ const GroupChat: React.FC = () => {
         setTempPrivateContextCap(activeGroup?.privateContextCap ?? 80);
         setTempMemberTimelineCap(activeGroup?.memberTimelineCap ?? DEFAULT_MEMBER_TIMELINE_CAP);
         setTempReplyMode(activeGroup?.replyMode ?? 'director');
+        setTempRoundRobinOrder(activeGroup ? resolveRoundRobinIds(activeGroup) : []);
         setTempMemberBubbleIndependent(activeGroup?.memberBubbleIndependent ?? false);
         setTempUserBubbleThemeId(activeGroup?.userBubbleThemeId ?? '');
         if (activeGroup) void loadTopicBoxStats(activeGroup);
@@ -1198,13 +1304,14 @@ ${sharedScene.text}${activeGroup ? buildGroupTopicContext(activeGroup) : ''}`;
         member: CharacterProfile,
         currentMsgs: Message[],
         sharedScene: ReturnType<typeof ContextBuilder.buildGroupSharedScene>,
+        includeMemoryPalace = true,
     ): Promise<string> => {
         const timelineCap = activeGroup?.memberTimelineCap ?? DEFAULT_MEMBER_TIMELINE_CAP;
         // 记忆宫殿检索源用当前群线程（滤掉媒体消息，base64 不能进 embedding query）：
         // 角色应召回与"群里正聊的话题"相关的记忆，而不是私聊近况（旧行为，召回跑偏）
         const liveGroupMsgs = currentMsgs.filter(m => m.id > (activeGroup?.archivedThroughMessageId || 0));
         const palaceQueryMsgs = liveGroupMsgs.slice(-30).filter(m => !m.type || m.type === 'text');
-        await injectMemoryPalace(member, palaceQueryMsgs, undefined, userProfile.name);
+        if (includeMemoryPalace) await injectMemoryPalace(member, palaceQueryMsgs, undefined, userProfile.name);
         // 角色块：跳过共享场景已包含的部分（用户档案 / 共有 worldview / 共有世界书）
         const coreContext = ContextBuilder.buildCoreContext({ ...member, mountedWorldbooks: [] }, userProfile, true, undefined, {
             skipUserProfile: true,
@@ -1504,7 +1611,10 @@ ${memberTimeline || '(暂无互动记录)'}
     // 单成员失败只跳过该成员，不杀整轮。
     const triggerRoundRobin = async (currentMsgs: Message[]) => {
         if (!activeGroup) return;
-        if (!apiConfig.apiKey) {
+        const groupMembers = resolveRoundRobinIds(activeGroup)
+            .map(id => characters.find(character => character.id === id))
+            .filter(Boolean) as CharacterProfile[];
+        if (groupMembers.every(member => !getCharacterApiConfig(member).apiKey)) {
             addToast('请先在设置里填好 API', 'error');
             return;
         }
@@ -1517,18 +1627,21 @@ ${memberTimeline || '(暂无互动记录)'}
         let tokenCompletion = 0;
 
         try {
-            const groupMembers = characters.filter(c => activeGroup.members.includes(c.id));
             let roundMsgs = [...currentMsgs];
 
             for (const member of groupMembers) {
                 if (abort.signal.aborted) break;
                 try {
+                    const memberApi = getCharacterApiConfig(member);
+                    if (!memberApi.baseUrl || !memberApi.apiKey || !memberApi.model) {
+                        throw new Error(`${member.name} 没有可用的 API 配置`);
+                    }
                     // 每位成员基于"此刻"的群历史构建上下文——包含本轮先发言成员的新消息
                     const { header, sharedScene } = buildGroupSystemHeader(roundMsgs, groupMembers);
                     const memberBlock = await buildMemberBlock(member, roundMsgs, sharedScene);
                     const liveRoundMsgs = roundMsgs.filter(m => m.id > (activeGroup.archivedThroughMessageId || 0));
                     const historyWindow = liveRoundMsgs.slice(-contextLimit);
-                    const preparedHistory = await materializeVisionDescriptions(historyWindow, apiConfig.visionApi);
+                    const preparedHistory = await materializeVisionDescriptions(historyWindow, memberApi.visionApi);
                     const preparedById = new Map(preparedHistory.map(message => [message.id, message]));
                     // 轮询模式后续成员继续复用本轮刚写回的描述，不能每位成员各识图一次。
                     roundMsgs = roundMsgs.map(message => preparedById.get(message.id) || message);
@@ -1538,7 +1651,7 @@ ${memberTimeline || '(暂无互动记录)'}
                         emojis,
                         userProfile.name,
                         3,
-                        { useVisionDescriptions: apiConfig.visionApi?.enabled === true },
+                        { useVisionDescriptions: memberApi.visionApi?.enabled === true },
                     );
                     const emojiContextStr = buildEmojiContextStr(emojis, categories, activeGroup.members);
                     const htmlPromptExt = activeGroup.htmlModeEnabled
@@ -1547,10 +1660,10 @@ ${memberTimeline || '(暂无互动记录)'}
                     const prompt = `${header}${memberBlock}\n\n${buildRoundRobinInstruction(member.name, { ...history, text: '（见下方独立消息历史）' }, emojiContextStr)}${htmlPromptExt}\n`;
 
                     const data = await completeGroupChatWithMcp({
-                        url: `${apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`,
-                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.apiKey}` },
+                        url: `${memberApi.baseUrl.replace(/\/+$/, '')}/chat/completions`,
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${memberApi.apiKey}` },
                         body: {
-                            model: apiConfig.model,
+                            model: memberApi.model,
                             messages: buildGroupRequestMessages([member], prompt, history),
                             temperature: 0.9,
                             max_tokens: 2000
@@ -1924,6 +2037,17 @@ ${memberTimeline || '(暂无互动记录)'}
             </div>
 
             {/* Redesigned Input Area (WeChat/iOS Style) */}
+            {activeGroup?.replyMode === 'roundRobin' && activeGroup.roundRobinQuickEntryEnabled !== false && !selectionMode && (
+                <div className="flex items-center justify-between gap-3 px-4 py-2 border-t border-violet-100 bg-violet-50/70 shrink-0">
+                    <div className="min-w-0 truncate text-[11px] text-violet-700">
+                        <span className="font-semibold">本轮发言顺序：</span>
+                        {resolveRoundRobinIds(activeGroup).map(id => characters.find(character => character.id === id)?.name || '未知角色').join(' → ')}
+                    </div>
+                    <button type="button" onClick={openRoundOrderEditor} disabled={isTyping} className="shrink-0 rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-[11px] font-bold text-violet-700 disabled:opacity-50">
+                        调整顺序
+                    </button>
+                </div>
+            )}
             {/* 回复预览条（对齐私聊 Chat.tsx 的样式与位置） */}
             {replyTarget && !selectionMode && (
                 <div className="flex items-center justify-between px-4 py-2 bg-slate-50 border-t border-slate-200 text-xs text-slate-500 shrink-0 z-40">
@@ -2079,8 +2203,12 @@ ${memberTimeline || '(暂无互动记录)'}
                                 className={`p-3 rounded-xl border cursor-pointer transition-all ${tempReplyMode === 'roundRobin' ? 'border-violet-400 bg-violet-50 ring-1 ring-violet-400' : 'border-slate-200 bg-white hover:border-slate-300'}`}
                             >
                                 <div className="text-xs font-bold text-slate-700">轮询模式</div>
-                                <p className="text-[9px] text-slate-400 mt-1 leading-tight">每位成员单独调用一次 API，按顺序逐个发言（每人必发言）。更真实、彻底防串号，但更慢，token 消耗约为导演模式 × 成员数。</p>
+                                <p className="text-[9px] text-slate-400 mt-1 leading-tight">每位成员单独调用一次 API，按顺序逐个发言（每人必发言）；已绑定角色专属 API 的成员会使用各自的 API。更真实、彻底防串号，但更慢，token 消耗约为导演模式 × 成员数。</p>
                             </div>
+                        </div>
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                            <button type="button" onClick={openPromptPreview} className="rounded-xl border border-violet-200 bg-white px-3 py-2.5 text-xs font-bold text-violet-700 hover:bg-violet-50">查看群聊提示词</button>
+                            <button type="button" onClick={openRoundOrderEditor} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50">调整轮询顺序</button>
                         </div>
                     </div>
 
@@ -2487,6 +2615,67 @@ ${memberTimeline || '(暂无互动记录)'}
                     </div>
                 );
             })()}
+
+            <Modal
+                isOpen={modalType === 'round-order'}
+                title="轮询发言顺序"
+                onClose={() => setModalType('none')}
+                footer={<button type="button" onClick={() => { void saveRoundRobinOrder(); }} className="w-full rounded-2xl bg-violet-500 py-3 font-bold text-white shadow-lg shadow-violet-200">保存顺序</button>}
+            >
+                <div className="space-y-3">
+                    <p className="text-xs leading-5 text-slate-500">轮询模式会按这里的顺序逐位调用角色。用上下箭头调整；每位角色发言后，后面的角色会看到本轮已发出的消息。</p>
+                    <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-violet-100 bg-violet-50/60 px-3 py-3">
+                        <span>
+                            <span className="block text-xs font-bold text-slate-700">显示输入框上方的快捷入口</span>
+                            <span className="mt-1 block text-[10px] leading-4 text-slate-500">关闭后仍按已保存的顺序轮询；需要时可从群设置重新开启。</span>
+                        </span>
+                        <input type="checkbox" checked={tempRoundRobinQuickEntryEnabled} onChange={e => setTempRoundRobinQuickEntryEnabled(e.target.checked)} className="h-4 w-4 accent-violet-500" />
+                    </label>
+                    {tempRoundRobinOrder.map((id, index) => {
+                        const member = characters.find(character => character.id === id);
+                        return (
+                            <div key={id} className="flex items-center gap-3 rounded-xl border border-slate-100 bg-white px-3 py-2.5">
+                                <span className="w-6 text-center text-xs font-bold text-violet-500">{index + 1}</span>
+                                {member?.avatar ? <TokenImg value={member.avatar} className="h-9 w-9 rounded-full object-cover" /> : <span className="h-9 w-9 rounded-full bg-violet-50" />}
+                                <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-700">{member?.name || '已删除的角色'}</span>
+                                <button type="button" aria-label="上移" disabled={index === 0} onClick={() => moveRoundRobinMember(index, -1)} className="rounded-lg px-2 py-1 text-lg text-slate-500 hover:bg-slate-100 disabled:opacity-30">↑</button>
+                                <button type="button" aria-label="下移" disabled={index === tempRoundRobinOrder.length - 1} onClick={() => moveRoundRobinMember(index, 1)} className="rounded-lg px-2 py-1 text-lg text-slate-500 hover:bg-slate-100 disabled:opacity-30">↓</button>
+                            </div>
+                        );
+                    })}
+                    {tempRoundRobinOrder.length === 0 && <p className="py-5 text-center text-xs text-slate-400">这个群目前没有成员。</p>}
+                </div>
+            </Modal>
+
+            <Modal isOpen={modalType === 'prompt-preview'} title="群聊提示词预览" onClose={() => setModalType('none')}>
+                <div className="space-y-3">
+                    <p className="text-xs leading-5 text-slate-500">查看当前模式实际使用的群聊规则、共享场景和角色档案。预览会读取聊天时间线，但不会触发模型请求或记忆宫殿注入；自动召回的记忆内容会随每轮变化。</p>
+                    <div className="grid grid-cols-2 gap-2">
+                        <label className="text-[10px] font-semibold text-slate-500">
+                            生成模式
+                            <select value={promptPreviewMode} onChange={e => setPromptPreviewMode(e.target.value as 'director' | 'roundRobin')} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+                                <option value="director">导演模式（全体角色）</option>
+                                <option value="roundRobin">轮询模式（单个角色）</option>
+                            </select>
+                        </label>
+                        {promptPreviewMode === 'roundRobin' && (
+                            <label className="text-[10px] font-semibold text-slate-500">
+                                查看角色
+                                <select value={promptPreviewCharId} onChange={e => setPromptPreviewCharId(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+                                    {activeGroup?.members.map(id => {
+                                        const member = characters.find(character => character.id === id);
+                                        return member ? <option key={id} value={id}>{member.name}</option> : null;
+                                    })}
+                                </select>
+                            </label>
+                        )}
+                    </div>
+                    <div className="rounded-xl bg-slate-50 px-3 py-2 text-[10px] leading-4 text-slate-500">
+                        {promptPreviewMode === 'director' ? '导演模式：一次请求包含全体角色档案和导演群聊规范。' : '轮询模式：展示所选角色收到的角色档案和单人发言规范。'}
+                    </div>
+                    <textarea readOnly value={promptPreviewLoading ? '正在整理预览…' : promptPreviewText} className="h-[52vh] min-h-64 w-full resize-y rounded-xl border border-slate-200 bg-slate-950 p-3 font-mono text-[11px] leading-5 text-slate-100 outline-none" />
+                </div>
+            </Modal>
 
             {/* 群聊记忆规则 */}
             <Modal isOpen={modalType === 'help'} title="群聊记忆规则" onClose={() => setModalType('none')}>

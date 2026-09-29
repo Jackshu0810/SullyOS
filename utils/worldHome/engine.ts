@@ -18,8 +18,9 @@ import { loadCharacterContextMessages } from '../chatContextRange';
 
 import type {
     CharacterProfile, UserProfile, GroupProfile, RealtimeConfig, APIConfig,
-    WorldProfile, WorldEpisode, WorldCharBeat, WorldCardMeta,
+    WorldProfile, WorldEpisode, WorldCharBeat, WorldCardMeta, ApiPreset,
 } from '../../types';
+import { resolveCharacterApiConfig } from '../characterApi';
 import { DB } from '../db';
 import { recoverWorldProgress } from './episodeOrder';
 import { buildChatRequestPayload } from '../chatRequestPayload';
@@ -43,6 +44,7 @@ export interface WorldEpisodeDeps {
     world: WorldProfile;
     characters: CharacterProfile[];
     apiConfig: APIConfig;
+    apiPresets?: ApiPreset[];
     userProfile: UserProfile;
     groups: GroupProfile[];
     realtimeConfig?: RealtimeConfig;
@@ -310,7 +312,7 @@ export async function injectWorldCard(world: WorldProfile, beat: WorldCharBeat, 
 }
 
 export async function runWorldEpisode(deps: WorldEpisodeDeps): Promise<WorldEpisodeResult> {
-    const { characters, apiConfig, userProfile, groups, realtimeConfig, memoryPalaceConfig, trigger } = deps;
+    const { characters, apiConfig, apiPresets = [], userProfile, groups, realtimeConfig, memoryPalaceConfig, trigger } = deps;
     const worldId = deps.world.id;
 
     if (running.has(worldId)) return { ok: false, reason: 'busy' };
@@ -329,9 +331,10 @@ export async function runWorldEpisode(deps: WorldEpisodeDeps): Promise<WorldEpis
             .filter(Boolean) as CharacterProfile[];
         if (members.length === 0) return { ok: false, reason: 'no-members' };
 
-        // API 优先级：世界私有覆盖（旧数据）> 家园全局设置（localStorage）> 全局聊天默认
+        // 世界私有覆盖优先；否则每位角色优先使用角色绑定 API，NPC/卷总结用家园或全局 API。
         const worldHomeApi = readWorldHomeApiOverride();
-        const api = world.api?.baseUrl ? world.api : (worldHomeApi || apiConfig);
+        const firstMemberApi = resolveCharacterApiConfig(members[0], apiConfig, apiPresets);
+        const api = world.api?.baseUrl ? world.api : (worldHomeApi || (members[0].apiPresetId ? firstMemberApi : apiConfig));
         if (!api.baseUrl) return { ok: false, reason: 'no-api' };
         const baseUrl = api.baseUrl.replace(/\/+$/, '');
 
@@ -377,6 +380,11 @@ export async function runWorldEpisode(deps: WorldEpisodeDeps): Promise<WorldEpis
         for (let i = 0; i < members.length; i++) {
             const char = members[i];
             try {
+                // 世界/家园显式配置仍优先；否则每位角色使用自己的绑定 API。
+                const boundApi = resolveCharacterApiConfig(char, apiConfig, apiPresets);
+                const memberApi = world.api?.baseUrl ? world.api : (char.apiPresetId ? boundApi : (worldHomeApi || apiConfig));
+                if (!memberApi.baseUrl || !memberApi.apiKey) throw new Error('该角色没有可用的 API');
+                const memberBaseUrl = memberApi.baseUrl.replace(/\/+$/, '');
                 const others = memberNames.filter(n => n !== char.name);
                 // 与彼方同款的名字加权召回：让向量记忆召回"我和这些人的关系"，
                 // 而不是被世界观情景词淹没。query = 当前世界的其他角色。
@@ -421,11 +429,11 @@ export async function runWorldEpisode(deps: WorldEpisodeDeps): Promise<WorldEpis
                 }) + buildOwnWorldHistory(world, lastEpisodes, char.id);
                 if (directive) consumedDirectiveIds.push(directive.id);
 
-                const data = await safeFetchJson(`${baseUrl}/chat/completions`, {
+                const data = await safeFetchJson(`${memberBaseUrl}/chat/completions`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${api.apiKey || 'sk-none'}` },
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${memberApi.apiKey || 'sk-none'}` },
                     body: JSON.stringify({
-                        model: api.model,
+                        model: memberApi.model,
                         messages: [{ role: 'system', content: systemPrompt }, ...payload.cleanedApiMessages, { role: 'user', content: turn }],
                         temperature: 0.9, stream: false,
                     }),
@@ -603,7 +611,7 @@ export async function runWorldEpisode(deps: WorldEpisodeDeps): Promise<WorldEpis
 export async function rerollWorldCharBeat(
     deps: WorldEpisodeDeps & { episodeId: string; charId: string; direction?: string },
 ): Promise<WorldEpisodeResult> {
-    const { characters, apiConfig, userProfile, groups, realtimeConfig, episodeId, charId, direction } = deps;
+    const { characters, apiConfig, apiPresets = [], userProfile, groups, realtimeConfig, episodeId, charId, direction } = deps;
     const worldId = deps.world.id;
     if (running.has(worldId)) return { ok: false, reason: 'busy' };
     running.add(worldId);
@@ -616,7 +624,8 @@ export async function rerollWorldCharBeat(
         if (!char) return { ok: false, reason: 'no-char' };
         const memberNames = members.map(m => m.name);
         const worldHomeApi = readWorldHomeApiOverride();
-        const api = world.api?.baseUrl ? world.api : (worldHomeApi || apiConfig);
+        const boundApi = resolveCharacterApiConfig(char, apiConfig, apiPresets);
+        const api = world.api?.baseUrl ? world.api : (char.apiPresetId ? boundApi : (worldHomeApi || apiConfig));
         if (!api.baseUrl) return { ok: false, reason: 'no-api' };
         const baseUrl = api.baseUrl.replace(/\/+$/, '');
 

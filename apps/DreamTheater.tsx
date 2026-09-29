@@ -574,7 +574,8 @@ const isSameDay = (a: number, b: number): boolean => {
 const DREAM_DAILY_TYPE_CAP = 3;
 
 const DreamTheater: React.FC<{ char: CharacterProfile; onExit: () => void }> = ({ char, onExit }) => {
-    const { apiConfig, userProfile, updateCharacter, addToast } = useOS();
+    const { getCharacterApiConfig, userProfile, updateCharacter, addToast } = useOS();
+    const characterApiConfig = getCharacterApiConfig(char);
 
     const [phase, setPhase] = useState<Phase>('idle');
     const [script, setScript] = useState<DreamScript | null>(null);
@@ -604,7 +605,7 @@ const DreamTheater: React.FC<{ char: CharacterProfile; onExit: () => void }> = (
 
     // ----- generate（后台进行：生成期间用户可离开小屋，好了全局提示 + 深链回来）-----
     const start = useCallback(async (opts?: { override?: boolean }) => {
-        if (!apiConfig?.baseUrl || !apiConfig?.apiKey || !apiConfig?.model) {
+        if (!characterApiConfig?.baseUrl || !characterApiConfig?.apiKey || !characterApiConfig?.model) {
             addToast('请先在设置里配置 API', 'error'); return;
         }
         // 每日限制：一天原则上只看一个梦；重复生成会提醒，可「少管我！」强行再看；
@@ -631,7 +632,7 @@ const DreamTheater: React.FC<{ char: CharacterProfile; onExit: () => void }> = (
         try {
             // 注意：不在 await 后直接 setState 播放，交给下方 consume effect 统一消费
             // （这样即使用户已离开、组件卸载，生成照常完成、全局指示条接管）
-            const s = await generateDreamScript({ char, userProfile, apiConfig, forcedArchetype: chosenArchetype });
+            const s = await generateDreamScript({ char, userProfile, apiConfig: characterApiConfig, forcedArchetype: chosenArchetype });
             dreamSimStore.set({ status: 'ready', charId: cid, charName: cname, script: s });
             addToast('梦已成形', 'success');
         } catch (e) {
@@ -639,7 +640,7 @@ const DreamTheater: React.FC<{ char: CharacterProfile; onExit: () => void }> = (
             dreamSimStore.set({ status: 'error', charId: cid, charName: cname });
             addToast('梦没能成形，请重试', 'error');
         }
-    }, [apiConfig, char, userProfile, addToast, forcedArchetype]);
+    }, [characterApiConfig, char, userProfile, addToast, forcedArchetype]);
 
     // ----- consume：把全局生成结果落到本地播放（含深链回来后的首次消费）-----
     useEffect(() => {

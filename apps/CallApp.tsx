@@ -511,7 +511,7 @@ ${currentVoiceActingGuide()}
   return [coreContext, timeContext, callPrompt, voiceLangPrompt].filter(Boolean).join('\n\n');
 };
 const CallApp: React.FC = () => {
-  const { closeApp, openApp, characters, activeCharacterId, addToast, apiConfig, userProfile, customThemes, suspendCall, suspendedCall, clearSuspendedCall, updateCharacter, characterGroups, groups, realtimeConfig, memoryPalaceConfig } = useOS();
+  const { closeApp, openApp, characters, activeCharacterId, addToast, apiConfig, getCharacterApiConfig, userProfile, customThemes, suspendCall, suspendedCall, clearSuspendedCall, updateCharacter, characterGroups, groups, realtimeConfig, memoryPalaceConfig } = useOS();
 
   const [viewMode, setViewMode] = useState<ViewMode>('role-select');
   const [selectedCharId, setSelectedCharId] = useState<string>(activeCharacterId || characters[0]?.id || '');
@@ -844,6 +844,7 @@ const CallApp: React.FC = () => {
   // VRM 模型的自定义表情名（加载时由画布回传），喂给基础版主模型或高质量导演。
   const vrmExpressionsRef = useRef<string[]>([]);
   const selectedChar = useMemo(() => characters.find(c => c.id === selectedCharId) || null, [characters, selectedCharId]);
+  const callApiConfig = useMemo(() => selectedChar ? getCharacterApiConfig(selectedChar) : apiConfig, [selectedChar, getCharacterApiConfig, apiConfig]);
   const selectedVisualSource = companionAvatarSource(selectedChar);
   const selectedDateOutfits = useMemo(() => listCompanionDateOutfits(selectedChar), [selectedChar]);
   const selectedDateOutfitId = normalizeCompanionSkinSetId(selectedChar?.companionAvatar?.skinSetId);
@@ -1749,7 +1750,7 @@ const CallApp: React.FC = () => {
     const configuredEmotionApi = character.emotionConfig?.api;
     return configuredEmotionApi?.baseUrl
       ? configuredEmotionApi
-      : { baseUrl: apiConfig.baseUrl, apiKey: apiConfig.apiKey, model: apiConfig.model };
+      : getCharacterApiConfig(character);
   };
 
   const buildLocalPerformancePersona = (character: CharacterProfile): string => {
@@ -1904,7 +1905,7 @@ ${sentencePlan}`;
     includeUserCameraContext = false,
     userCameraSnapshotForTurn?: string,
   ): Promise<ParsedCallReply> => {
-    const baseUrl = apiConfig.baseUrl?.replace(/\/+$/, '');
+    const baseUrl = callApiConfig.baseUrl?.replace(/\/+$/, '');
     if (!baseUrl) throw new Error('请先在设置里配置聊天 API URL');
     const userName = userProfile?.name?.trim() || '用户';
     if (selectedChar) {
@@ -1917,7 +1918,7 @@ ${sentencePlan}`;
     const messages = await buildHistoryMessages(input, skipDbId, touchContext);
     const thinkingPrompt = selectedChar?.showThinkingChain
       ? [
-          buildThinkingChainPrompt(selectedChar.name, userName),
+          selectedChar.thinkingPromptEnabled === false ? '' : buildThinkingChainPrompt(selectedChar.name, userName),
           selectedChar.thinkingChainCustomPrompt?.trim()
             ? `【用户追加的 THINKING 要求】\n${selectedChar.thinkingChainCustomPrompt.trim()}`
             : '',
@@ -1967,9 +1968,9 @@ ${sentencePlan}`;
       purpose: string,
     ) => safeFetchJson(`${baseUrl}/chat/completions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiConfig.apiKey || 'sk-none'}` },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${callApiConfig.apiKey || 'sk-none'}` },
       body: JSON.stringify({
-        model: apiConfig.model,
+        model: callApiConfig.model,
         messages: [{ role: 'system', content: nextSystemPrompt }, ...nextMessages],
         temperature: 0.85,
         // max_tokens 是 Claude 原生 API 的必填字段；缺了它，OpenAI→Claude 中转会被

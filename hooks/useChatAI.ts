@@ -1,6 +1,6 @@
 
 import { useState, useRef, useEffect, useSyncExternalStore, MutableRefObject } from 'react';
-import { CharacterProfile, UserProfile, Message, Emoji, EmojiCategory, GroupProfile, RealtimeConfig, CharacterBuff, Amsg2ExpiredNoticeRecord } from '../types';
+import { CharacterProfile, UserProfile, Message, Emoji, EmojiCategory, GroupProfile, RealtimeConfig, CharacterBuff, Amsg2ExpiredNoticeRecord, ApiPreset } from '../types';
 import { DB } from '../utils/db';
 import { ChatPrompts } from '../utils/chatPrompts';
 import { safeFetchJson, safeResponseJson } from '../utils/safeApi';
@@ -28,6 +28,7 @@ import { buildMcpOpenAITools, buildMcpRejectedToolsFallbackBody, buildMcpTextFal
 import { buildToolResultMessage, normalizeToolCallsForCompat } from '../utils/toolCallCompat';
 import { toolCallFingerprint } from '../utils/agenticToolFeedback';
 import { buildChatRequestPayload } from '../utils/chatRequestPayload';
+import { resolveCharacterApiConfig } from '../utils/characterApi';
 import { acquireChatReply, isChatReplyActive, subscribeChatReplies } from '../utils/chatReplyLock';
 import { withChatContinuation } from '../utils/chatContinuation';
 import { assertChatHasDialogue } from '../utils/chatRequestGuard';
@@ -448,6 +449,7 @@ interface UseChatAIProps {
     char: CharacterProfile | undefined;
     userProfile: UserProfile;
     apiConfig: any;
+    apiPresets?: ApiPreset[];
     groups: GroupProfile[];
     emojis: Emoji[];
     categories: EmojiCategory[];
@@ -475,6 +477,7 @@ export const useChatAI = ({
     char,
     userProfile,
     apiConfig,
+    apiPresets = [],
     groups,
     emojis,
     categories,
@@ -616,7 +619,7 @@ export const useChatAI = ({
         opts?: { skipEmotionInjection?: boolean },
     ) => {
         if (isTyping || !char) return;
-        const effectiveApi = overrideApiConfig || apiConfig;
+        const effectiveApi = overrideApiConfig || resolveCharacterApiConfig(char, apiConfig, apiPresets);
         if (!effectiveApi.baseUrl) { alert("请先在设置中配置 API URL"); return; }
 
         // 重 roll（回溯重生）时不带入上一轮的情绪余波：清掉 buff 注入（buffInjection/activeBuffs）和
@@ -901,7 +904,7 @@ export const useChatAI = ({
                 recentTrackChange: music.recentTrackChange,
                 translationConfig,
                 htmlMode: { enabled: !!(char as any).htmlModeEnabled, customPrompt: (char as any).htmlModeCustomPrompt },
-                thinkingChain: { enabled: !!(char as any).showThinkingChain, customPrompt: (char as any).thinkingChainCustomPrompt },
+                thinkingChain: { enabled: !!(char as any).showThinkingChain, promptEnabled: char.thinkingPromptEnabled !== false, customPrompt: (char as any).thinkingChainCustomPrompt },
                 visionApiConfig: apiConfig.visionApi,
                 mcdMiniSnap: mcdMiniOpen ? mcdMiniSnap : undefined,
                 luckinMiniSnap: luckinMiniOpen ? luckinMiniSnap : undefined,

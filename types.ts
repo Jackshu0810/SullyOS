@@ -2692,6 +2692,8 @@ export interface MemoryPalaceWaterlineConfig {
 export interface CharacterProfile {
   id: string;
   name: string;
+  /** Saved primary API preset used for this character; absent/deleted means follow the global API. */
+  apiPresetId?: string;
   avatar: string;
   /**
    * 视频通话使用的本地 VRM / Live2D 形象。模型二进制包保存在 IndexedDB
@@ -2854,6 +2856,13 @@ export interface CharacterProfile {
   /** Only the chat title uses the remark; the canonical name stays unchanged. */
   chatShowRemark?: boolean;
   systemPrompt: string;
+  /** User-editable core system prompt for this character's normal chat. */
+  /** User-authored first assistant message shown when a fresh chat starts. */
+  chatOpening?: string;
+  /** Controls built-in Chat App roleplay guidance; all default to enabled. */
+  chatReplyStyleEnabled?: boolean;
+  chatEmotionResponseRulesEnabled?: boolean;
+  chatFeedbackResponseRulesEnabled?: boolean;
   worldview?: string;
   /** 角色分组：指向 CharacterGroup.id；空或指向已删分组 = 未分组。仅本地组织用，不随角色卡导出 */
   groupId?: string;
@@ -3129,6 +3138,8 @@ export interface CharacterProfile {
    *   UI 自然不会显示，符合"打开后才看"的预期。
    */
   showThinkingChain?: boolean;
+  /** Whether to send the built-in thinking guidance; defaults to enabled and is independent of card styling. */
+  thinkingPromptEnabled?: boolean;
   /**
    * 思考链卡片视觉风格（per-character）。
    * - 'echo' (default)：暗紫底 + 暖金描边「回响」二次元卡牌
@@ -3207,6 +3218,10 @@ export interface GroupProfile {
      * roundRobin = 每位成员单独调用一次 API，按成员顺序逐个发言（更真实、防串号，token ≈ 成员数倍）。
      */
     replyMode?: 'director' | 'roundRobin';
+    /** 轮询模式的发言顺序；缺省沿用角色列表中的群成员顺序。 */
+    roundRobinOrder?: string[];
+    /** 是否在群聊输入框上方显示轮询顺序快捷入口；默认显示。 */
+    roundRobinQuickEntryEnabled?: boolean;
     /**
      * 成员独立气泡：true = 每位成员的气泡用其私聊 bubbleStyle 主题的 AI 侧；
      * false/undefined = 全员统一（现状白色）。

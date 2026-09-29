@@ -663,7 +663,7 @@ const MemoryWaterlineEditor: React.FC<{
 
 export default function MemoryPalaceApp() {
     const guideStep = useFirstUseGuideStep();
-    const { activeCharacterId, characters, updateCharacter, setActiveCharacterId, closeApp, apiPresets, userProfile, memoryPalaceConfig, updateMemoryPalaceConfig, remoteVectorConfig, updateRemoteVectorConfig, addToast, apiConfig, characterGroups, groups, realtimeConfig } = useOS();
+    const { activeCharacterId, characters, updateCharacter, setActiveCharacterId, closeApp, apiPresets, userProfile, memoryPalaceConfig, updateMemoryPalaceConfig, remoteVectorConfig, updateRemoteVectorConfig, addToast, apiConfig, getCharacterApiConfig, characterGroups, groups, realtimeConfig } = useOS();
     const char = characters.find(c => c.id === activeCharacterId);
     const [selectGroupId, setSelectGroupId] = useState(GROUP_FILTER_ALL); // 选角色页的分组筛选
 
@@ -992,8 +992,8 @@ export default function MemoryPalaceApp() {
         if (!char || detectingPersonality) return;
         const llm = (lightLLMBaseUrl && lightLLMApiKey)
             ? memoryPalaceConfig.lightLLM
-            : (apiConfig?.baseUrl && apiConfig?.apiKey
-                ? { baseUrl: apiConfig.baseUrl, apiKey: apiConfig.apiKey, model: apiConfig.model }
+            : (getCharacterApiConfig(char).baseUrl && getCharacterApiConfig(char).apiKey
+                ? { baseUrl: getCharacterApiConfig(char).baseUrl, apiKey: getCharacterApiConfig(char).apiKey, model: getCharacterApiConfig(char).model }
                 : null);
         if (!llm) {
             addToast('请先配置副 API（记忆宫殿全局设置）或主 API', 'error');

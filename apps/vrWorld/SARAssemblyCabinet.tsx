@@ -203,10 +203,11 @@ export const SARAssemblyCabinetOverlay: React.FC<{
     characters: CharacterProfile[];
     characterGroups?: CharacterGroup[];
     apiConfig: APIConfig;
+    resolveCharacterApi?: (character: CharacterProfile) => APIConfig;
     userProfile: UserProfile;
     groups: GroupProfile[];
     realtimeConfig?: RealtimeConfig;
-}> = ({ onClose, characters, characterGroups = [], apiConfig, userProfile, groups, realtimeConfig }) => {
+}> = ({ onClose, characters, characterGroups = [], apiConfig, resolveCharacterApi, userProfile, groups, realtimeConfig }) => {
     const [view, setView] = useState<CabinetView>('cards');
     const [shelf, setShelf] = useState<CabinetShelf>('mine');
     const [selectedCharId, setSelectedCharId] = useState(characters[0]?.id || '');
@@ -225,6 +226,9 @@ export const SARAssemblyCabinetOverlay: React.FC<{
     const [sessionTheme, setSessionTheme] = useState<SARSessionTheme>(readSARSessionTheme);
     const gachaState = useMemo(() => readSARGachaState(), []);
     const selectedChar = characters.find(char => char.id === selectedCharId) || null;
+    const selectedCharApi = selectedChar && resolveCharacterApi ? resolveCharacterApi(selectedChar) : apiConfig;
+    const activeSessionChar = activeCard ? characters.find(char => char.id === activeCard.charId) : undefined;
+    const activeSessionApi = activeSessionChar && resolveCharacterApi ? resolveCharacterApi(activeSessionChar) : apiConfig;
     const activeRun = activeCard ? (
         simulationState.runs.find(run => run.cardId === activeCard.id && run.status === 'active')
         || simulationState.runs.find(run => run.cardId === activeCard.id)
@@ -292,7 +296,7 @@ export const SARAssemblyCabinetOverlay: React.FC<{
         setLoading(true);
         setError('');
         try {
-            const card = await forgeSARIdentityCard({ char: selectedChar, variant, story, apiConfig, userProfile, groups, realtimeConfig });
+            const card = await forgeSARIdentityCard({ char: selectedChar, variant, story, apiConfig: selectedCharApi, userProfile, groups, realtimeConfig });
             setSimulationState(readSARSimulationState());
             setActiveCard(card);
             setView('card');
@@ -361,8 +365,8 @@ export const SARAssemblyCabinetOverlay: React.FC<{
             {view === 'session' && activeCard && activeRun ? <SARSimulationSession
                 card={activeCard}
                 run={activeRun}
-                char={characters.find(char => char.id === activeCard.charId)}
-                apiConfig={apiConfig}
+                char={activeSessionChar}
+                apiConfig={activeSessionApi}
                 userProfile={userProfile}
                 onRunChange={() => setSimulationState(readSARSimulationState())}
                 onThemeChange={setSessionTheme}

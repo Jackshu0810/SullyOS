@@ -44,7 +44,7 @@ import {
 } from '../utils/dateHistory';
 
 const DateApp: React.FC = () => {
-    const { closeApp, openApp, characters, activeCharacterId, setActiveCharacterId, apiConfig, addToast, updateCharacter, updateUserProfile, virtualTime, userProfile, memoryPalaceConfig, dateAutoStartCharId, consumeDateAutoStart, characterGroups, groups, realtimeConfig } = useOS();
+    const { closeApp, openApp, characters, activeCharacterId, setActiveCharacterId, apiConfig, getCharacterApiConfig, addToast, updateCharacter, updateUserProfile, virtualTime, userProfile, memoryPalaceConfig, dateAutoStartCharId, consumeDateAutoStart, characterGroups, groups, realtimeConfig } = useOS();
 
     // 是否由聊天「见面」按钮进入：为真时，退出见面流程回到聊天而非见面选择页/桌面。
     // 用本地 state（而非 context）承载：DateApp 切走即卸载，标记随之消失，不会泄漏到
@@ -220,18 +220,19 @@ const DateApp: React.FC = () => {
 
     // peek / send / reroll 共用的 LLM 调用（提示词构建统一在 utils/datePrompts.ts）
     const callLLM = async (messages: ApiMessage[], temperature: number): Promise<string> => {
-        const response = await fetch(`${apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+        const requestApi = getCharacterApiConfig(char || undefined);
+        const response = await fetch(`${requestApi.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.apiKey}` },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${requestApi.apiKey}` },
             body: JSON.stringify({
-                model: apiConfig.model,
+                model: requestApi.model,
                 messages,
                 temperature,
                 // max_tokens 是 Claude 原生 API 的必填字段；缺了它，糯米机/Csy 等
                 // OpenAI→Claude 中转会被上游打回，再包成 502 / bad_response_status_code。
                 // 与私聊 (useChatAI.ts) 对齐，统一带 8000。
                 max_tokens: 8000,
-                stream: apiConfig.stream ?? false,
+                stream: requestApi.stream ?? apiConfig.stream ?? false,
             })
         });
         if (!response.ok) throw new Error(`API Error ${response.status}`);
@@ -364,9 +365,10 @@ const DateApp: React.FC = () => {
         if (!liveBefore?.memoryPalaceEnabled) return;
         const mpEmb = memoryPalaceConfig?.embedding;
         const mpLLMConfigured = memoryPalaceConfig?.lightLLM;
+        const characterApi = getCharacterApiConfig(charForHook);
         const mpLLM = (mpLLMConfigured?.baseUrl)
             ? mpLLMConfigured
-            : { baseUrl: apiConfig.baseUrl, apiKey: apiConfig.apiKey, model: apiConfig.model };
+            : { baseUrl: characterApi.baseUrl, apiKey: characterApi.apiKey, model: characterApi.model };
         if (!mpEmb?.baseUrl || !mpEmb?.apiKey || !mpLLM.baseUrl) return;
 
         const recentMsgs = await DB.getRecentMessagesByCharId(charForHook.id, 50);
@@ -407,7 +409,7 @@ const DateApp: React.FC = () => {
             }
             setMemoryPalaceStatus('');
         }
-    }, [memoryPalaceConfig, apiConfig, userProfile?.name, updateCharacter, addToast]);
+    }, [memoryPalaceConfig, apiConfig, getCharacterApiConfig, userProfile?.name, updateCharacter, addToast]);
 
     // --- Session API Logic ---
     const handleSendMessage = async (text: string, kind?: 'continue'): Promise<string> => {

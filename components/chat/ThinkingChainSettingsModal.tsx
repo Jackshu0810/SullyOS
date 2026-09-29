@@ -3,6 +3,7 @@ import type {ThinkingChainStyleId} from '../../utils/psycheAppearance';
 
 interface ThinkingChainSettingsValue {
     enabled: boolean;
+    promptEnabled: boolean;
     styleId: ThinkingChainStyleId;
     customColors: { bg: string; accent: string; text: string };
     customPrompt: string;
@@ -96,6 +97,19 @@ const ThinkingChainSettingsModal: React.FC<Props> = ({ isOpen, onClose, value, o
                             </div>
                             <div className={`shrink-0 ml-3 w-10 h-6 rounded-full p-1 transition-colors flex items-center ${value.enabled ? 'bg-indigo-500' : 'bg-slate-200'}`}>
                                 <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${value.enabled ? 'translate-x-4' : ''}`} />
+                            </div>
+                        </div>
+                    </section>
+
+                    {/* Built-in thinking guidance toggle; independent from card display/style. */}
+                    <section>
+                        <div className="flex items-center justify-between cursor-pointer" onClick={() => onChange({ promptEnabled: !value.promptEnabled })}>
+                            <div>
+                                <div className="text-[13px] font-bold text-slate-700">发送项目内置 thinking 引导词</div>
+                                <div className="text-[10.5px] text-slate-400 mt-0.5">只控制 AI 的内置心象引导；关闭后仍可显示模型返回的思考过程，追加提示词也照常发送。</div>
+                            </div>
+                            <div className={`shrink-0 ml-3 w-10 h-6 rounded-full p-1 transition-colors flex items-center ${value.promptEnabled ? 'bg-indigo-500' : 'bg-slate-200'}`}>
+                                <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${value.promptEnabled ? 'translate-x-4' : ''}`} />
                             </div>
                         </div>
                     </section>

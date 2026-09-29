@@ -119,7 +119,7 @@ async function callCharAI(
 // ── 主组件 ──────────────────────────────────────────────────────
 
 const LifeSimApp: React.FC = () => {
-    const { apiConfig, apiPresets, characters, userProfile, closeApp } = useOS();
+    const { apiConfig, apiPresets, getCharacterApiConfig, characters, userProfile, closeApp } = useOS();
 
     const [gameState, setGameState] = useState<LifeSimState | null>(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -188,8 +188,8 @@ const LifeSimApp: React.FC = () => {
         return characters.filter(char => !!char.id && allowedIds.has(char.id));
     }, [characters, resolveParticipantCharIds]);
 
-    const resolveLifeSimApiConfig = useCallback((state: LifeSimState | null | undefined) => {
-        if (!state?.useIndependentApiConfig) return apiConfig;
+    const resolveLifeSimApiConfig = useCallback((state: LifeSimState | null | undefined, character?: CharacterProfile) => {
+        if (!state?.useIndependentApiConfig) return character ? getCharacterApiConfig(character) : apiConfig;
         const override = state.independentApiConfig || {};
         return {
             ...apiConfig,
@@ -197,7 +197,7 @@ const LifeSimApp: React.FC = () => {
             apiKey: override.apiKey?.trim() || apiConfig.apiKey,
             model: override.model?.trim() || apiConfig.model,
         };
-    }, [apiConfig]);
+    }, [apiConfig, getCharacterApiConfig]);
 
     const buildMainPlotAction = useCallback(async (state: LifeSimState) => {
         if (!userProfile) return null;
@@ -426,12 +426,12 @@ const LifeSimApp: React.FC = () => {
         if (!userProfile) return;
         let s = deepClone(initialState);
         const replayActions: SimAction[] = [...seededReplayActions];
-        const resolvedApiConfig = resolveLifeSimApiConfig(initialState);
-        const canUseApi = !!(resolvedApiConfig?.baseUrl && resolvedApiConfig?.apiKey && resolvedApiConfig?.model);
 
         for (const charId of s.charQueue) {
             const char = characters.find(c => c.id === charId);
             if (!char) continue;
+            const charApiConfig = resolveLifeSimApiConfig(s, char);
+            const charCanUseApi = !!(charApiConfig?.baseUrl && charApiConfig?.apiKey && charApiConfig?.model);
             s.isProcessingCharTurn = true; s.currentActorId = charId;
             setProcessingMsg(`${char.name} 正在思考……`);
             await saveState(s);
@@ -440,7 +440,7 @@ const LifeSimApp: React.FC = () => {
                 let rawJson: any = null;
                 let decision: CharDecision;
 
-                if (canUseApi) {
+                if (charCanUseApi) {
                     const rawMessages = await loadCharacterContextMessages(char);
                     const chatHistory = formatRecentChatForSim(
                         rawMessages as any, char.name, userProfile.name || '你', rawMessages.length
@@ -448,7 +448,7 @@ const LifeSimApp: React.FC = () => {
                     await injectMemoryPalace(char, undefined, chatHistory || undefined);
                     const systemPrompt = buildCharTurnSystemPrompt(char, userProfile, chatHistory, s, s.actionLog);
                     const raw = await callCharAI(
-                        { baseUrl: resolvedApiConfig.baseUrl, apiKey: resolvedApiConfig.apiKey, model: resolvedApiConfig.model },
+                        { baseUrl: charApiConfig.baseUrl, apiKey: charApiConfig.apiKey, model: charApiConfig.model },
                         systemPrompt, { char, user: userProfile }
                     );
 

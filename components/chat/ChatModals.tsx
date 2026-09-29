@@ -30,6 +30,7 @@ interface ChatModalsProps {
     setSettingsContextRangeMode: (v: ContextRangeMode) => void;
     settingsHideSysLogs: boolean;
     setSettingsHideSysLogs: (v: boolean) => void;
+    onTogglePromptCategory?: (category: 'replyStyle' | 'emotionResponse' | 'feedbackResponse') => void;
     settingsInputPreferences: ChatInputPreferences;
     setSettingsInputPreferences: (value: ChatInputPreferences) => void;
     contextSuiteAnyEnabled: boolean;
@@ -169,6 +170,29 @@ interface TranslationLanguagePickerProps {
     onSelect?: (lang: string) => void;
 }
 
+const PromptCategoryToggle: React.FC<{
+    label: string;
+    description: string;
+    enabled: boolean;
+    onToggle: () => void;
+}> = ({ label, description, enabled, onToggle }) => (
+    <button
+        type="button"
+        role="switch"
+        aria-checked={enabled}
+        onClick={onToggle}
+        className="w-full flex justify-between items-center gap-3 py-2 text-left"
+    >
+        <span className="min-w-0 flex-1">
+            <span className="block text-xs font-bold text-slate-500">{label}</span>
+            <span className="block mt-0.5 text-[10px] text-slate-400 leading-relaxed">{description}</span>
+        </span>
+        <span className={`w-10 h-6 rounded-full p-1 transition-colors flex items-center shrink-0 ${enabled ? 'bg-primary' : 'bg-slate-200'}`}>
+            <span className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${enabled ? 'translate-x-4' : ''}`}></span>
+        </span>
+    </button>
+);
+
 const TranslationLanguagePicker: React.FC<TranslationLanguagePickerProps> = ({
     label,
     value,
@@ -246,7 +270,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
     emojiImportText, setEmojiImportText,
     settingsContextLimit, setSettingsContextLimit,
     settingsContextRangeMode, setSettingsContextRangeMode,
-    settingsHideSysLogs, setSettingsHideSysLogs,
+    settingsHideSysLogs, setSettingsHideSysLogs, onTogglePromptCategory,
     settingsInputPreferences, setSettingsInputPreferences,
     contextSuiteAnyEnabled, contextSuiteAllEnabled, onToggleContextSuite,
     editContent, setEditContent,
@@ -403,6 +427,31 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                             </div>
                             <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
                                 开启后隐藏见面/小程序等自动产生的灰色提示（转账、戳一戳、发图提示除外）。
+                            </p>
+                        </div>
+                    </ChatSettingsSection>
+                    <ChatSettingsSection title="角色扮演规范" summary="分别控制回复风格、情绪回应与倾听反馈规范">
+                        <div className="pt-2 border-t border-slate-100">
+                            <PromptCategoryToggle
+                                label="回复风格约束"
+                                description="沉浸感、个性化表达、对话质量与情绪层次"
+                                enabled={activeCharacter.chatReplyStyleEnabled !== false}
+                                onToggle={() => onTogglePromptCategory?.('replyStyle')}
+                            />
+                            <PromptCategoryToggle
+                                label="情绪回应规则"
+                                description="从语气变化察觉情绪，以及面对害怕或重大变故时的回应顺序"
+                                enabled={activeCharacter.chatEmotionResponseRulesEnabled !== false}
+                                onToggle={() => onTogglePromptCategory?.('emotionResponse')}
+                            />
+                            <PromptCategoryToggle
+                                label="倾听与反馈规则"
+                                description="尊重用户明确表达的感受，并让用户反馈影响后续回应"
+                                enabled={activeCharacter.chatFeedbackResponseRulesEnabled !== false}
+                                onToggle={() => onTogglePromptCategory?.('feedbackResponse')}
+                            />
+                            <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
+                                默认全部开启，按角色分别记住。聊天气泡格式、模式切换格式、语音格式和角色声音提示始终保留；表情、引用和工具指令也不受这些开关影响。
                             </p>
                         </div>
                     </ChatSettingsSection>

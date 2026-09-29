@@ -305,7 +305,7 @@ const BlackboardRenderer: React.FC<{ text: string, isTyping?: boolean, katexRend
 };
 
 const StudyApp: React.FC = () => {
-    const { closeApp, characters, activeCharacterId, apiConfig, addToast, userProfile, updateCharacter, characterGroups } = useOS();
+    const { closeApp, characters, activeCharacterId, apiConfig, getCharacterApiConfig, addToast, userProfile, updateCharacter, characterGroups } = useOS();
     const [mode, setMode] = useState<'bookshelf' | 'classroom' | 'quiz' | 'quiz_review' | 'practice_book'>('bookshelf');
     const [courses, setCourses] = useState<StudyCourse[]>([]);
     const [activeCourse, setActiveCourse] = useState<StudyCourse | null>(null);
@@ -347,11 +347,13 @@ const StudyApp: React.FC = () => {
     const [presetName, setPresetName] = useState('');
     const [presetPrompt, setPresetPrompt] = useState('');
 
-    // Effective API config: study-specific overrides fall back to main config
+    // Study-specific overrides win; otherwise use the selected tutor's character API.
+    const characterApi = selectedChar ? getCharacterApiConfig(selectedChar) : apiConfig;
     const effectiveApi: APIConfig = {
-        baseUrl: studyApi.baseUrl || apiConfig.baseUrl,
-        apiKey: studyApi.apiKey || apiConfig.apiKey,
-        model: studyApi.model || apiConfig.model,
+        ...characterApi,
+        baseUrl: studyApi.baseUrl || characterApi.baseUrl,
+        apiKey: studyApi.apiKey || characterApi.apiKey,
+        model: studyApi.model || characterApi.model,
     };
 
     // Delete Confirmation State

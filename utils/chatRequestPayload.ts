@@ -93,7 +93,7 @@ export interface BuildChatPayloadInput {
     // 模式开关
     translationConfig?: TranslationConfig | { enabled: boolean; sourceLang: string; targetLang: string };
     htmlMode?: { enabled: boolean; customPrompt?: string };
-    thinkingChain?: { enabled: boolean; customPrompt?: string };
+    thinkingChain?: { enabled: boolean; promptEnabled?: boolean; customPrompt?: string };
     /** 可选识图 API：开启后先把图片持久化转写为 [图片：描述]，主模型只接收文字。 */
     visionApiConfig?: VisionApiConfig;
     mcdMiniSnap?: McdMiniAppSnapshot;
@@ -341,7 +341,8 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
     const cleanedApiMessages = cleanApiMessages(input.stripImages ? flattenImageContentParts(apiMessages) : apiMessages);
 
     const parts = await ChatPrompts.buildSystemPromptParts(
-        char, userProfile, groups, emojis, categories, recentMsgsHint,
+        char,
+        userProfile, groups, emojis, categories, recentMsgsHint,
         realtimeConfig, innerState || undefined,
         userListeningContext ?? null,
         !!isListeningTogether,
@@ -351,6 +352,9 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
             history: cleanedApiMessages,
             timelyByWorker: input.timelyByWorker === true,
             returningFromMode: returningFromMode || undefined,
+            replyStyleEnabled: char.chatReplyStyleEnabled !== false,
+            emotionResponseRulesEnabled: char.chatEmotionResponseRulesEnabled !== false,
+            feedbackResponseRulesEnabled: char.chatFeedbackResponseRulesEnabled !== false,
         },
     );
     let systemPrompt = parts.stable;
@@ -405,7 +409,9 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
     const thinkingActive = !!thinkingChain?.enabled;
     if (thinkingActive) {
         const userName = (userProfile?.name && userProfile.name.trim()) || '用户';
-        systemPrompt += `\n\n${buildThinkingChainPrompt(char.name, userName)}`;
+        if (thinkingChain?.promptEnabled !== false) {
+            systemPrompt += `\n\n${buildThinkingChainPrompt(char.name, userName)}`;
+        }
         const extra = (thinkingChain?.customPrompt || '').trim();
         if (extra) {
             systemPrompt += `\n\n## 用户对内心独白的额外要求\n${extra}`;

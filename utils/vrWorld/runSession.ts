@@ -23,8 +23,9 @@ import { loadCharacterContextMessages } from '../chatContextRange';
 import {
     CharacterProfile, UserProfile, GroupProfile, RealtimeConfig, APIConfig,
     VRWorldNovel, VRCardMeta, VRRoomId, VRMusicRoomState, CharPlaylistSong, CharMusicReview,
-    VRGuestbookState, VRGuestbookMessage, VRLetter, VRScript, SignalPoem,
+    VRGuestbookState, VRGuestbookMessage, VRLetter, VRScript, SignalPoem, ApiPreset,
 } from '../../types';
+import { resolveCharacterApiConfig } from '../characterApi';
 import { DB } from '../db';
 import { buildChatRequestPayload } from '../chatRequestPayload';
 import { safeFetchJson } from '../safeApi';
@@ -80,6 +81,7 @@ export interface VRSessionDeps {
     /** 全部角色（算听歌房在场名单用） */
     characters: CharacterProfile[];
     apiConfig: APIConfig;
+    apiPresets?: ApiPreset[];
     userProfile: UserProfile;
     groups: GroupProfile[];
     realtimeConfig?: RealtimeConfig;
@@ -271,7 +273,7 @@ export async function runVRSession(deps: VRSessionDeps): Promise<VRSessionResult
     return runVRSessionUnlocked(deps);
 }
 async function runVRSessionUnlocked(deps: VRSessionDeps): Promise<VRSessionResult> {
-    const { char, characters, apiConfig, userProfile, groups, realtimeConfig, memoryPalaceConfig, updateUserProfile, forcedRoom, forcedSARActivity, forcedLetterId, manual } = deps;
+    const { char, characters, apiConfig, apiPresets = [], userProfile, groups, realtimeConfig, memoryPalaceConfig, updateUserProfile, forcedRoom, forcedSARActivity, forcedLetterId, manual } = deps;
     if (!char.vrState?.enabled) return { ok: false, reason: 'not-enabled' };
     if (!manual && !allowsAutomaticVR(char.vrState)) return { ok: false, reason: 'manual-only' };
     const updateCharacter = (id: string, patch: Partial<CharacterProfile>) =>
@@ -301,7 +303,11 @@ async function runVRSessionUnlocked(deps: VRSessionDeps): Promise<VRSessionResul
 
     // API 优先级：角色自带覆盖 > 彼方独立 API > 聊天默认
     const vrGlobalApi = await getVRApi();
-    const vrApi = char.vrState?.api?.baseUrl ? char.vrState.api : (vrGlobalApi?.baseUrl ? vrGlobalApi : apiConfig);
+    const vrApi = char.vrState?.api?.baseUrl
+        ? char.vrState.api
+        : (char.apiPresetId
+            ? resolveCharacterApiConfig(char, apiConfig, apiPresets)
+            : (vrGlobalApi?.baseUrl ? vrGlobalApi : apiConfig));
     if (!vrApi.baseUrl) return { ok: false, reason: 'no-api' };
 
     const novels = await DB.getVRNovels();

@@ -1,5 +1,6 @@
 import {resolvePsycheAppearance} from '../utils/psycheAppearance';
 import { startsNewMessageGroup } from '../utils/chatMessageGrouping';
+import { MagnifyingGlass } from '@phosphor-icons/react';
 import EmojiExportDialog from '../components/chat/EmojiExportDialog';
 import React, { useState, useEffect, useRef, useLayoutEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
@@ -49,6 +50,7 @@ import MemoryRepairPortal from '../components/chat/MemoryRepairPortal';
 import FavoritesPortal from '../components/chat/VoiceFavoritesPortal';
 import ChatModals from '../components/chat/ChatModals';
 import ChatHistoryCleanupModal from '../components/chat/ChatHistoryCleanupModal';
+import ChatHistorySearchModal from '../components/chat/ChatHistorySearchModal';
 import type { ChatCleanupPlan } from '../utils/chatHistoryCleanup';
 import Modal from '../components/os/Modal';
 import MemoryContextSelfCheck from '../components/chat/MemoryContextSelfCheck';
@@ -131,7 +133,7 @@ const HISTORY_WINDOW_BATCH_SIZE = 30;
 const INSTANT_VOICE_SCAN_WINDOW_MS = 30_000;
 
 const Chat: React.FC = () => {
-    const { activeApp, characters, activeCharacterId, setActiveCharacterId, addCharacter, updateCharacter, updateUserProfile, apiConfig, apiPresets, availableModels, addApiPreset, closeApp, openApp, customThemes, addCustomTheme, removeCustomTheme, addWorldbook, updateTheme, saveAppearancePreset, addToast, showError, userProfile, lastMsgTimestamp, groups, characterGroups, clearUnread, unreadMessages, realtimeConfig, memoryPalaceConfig, updateMemoryPalaceConfig, remoteVectorConfig, syncEmotionApiToAllCharacters, theme: baseOsTheme, proactiveComposingChars, openDateWithChar } = useOS();
+    const { activeApp, characters, activeCharacterId, setActiveCharacterId, addCharacter, updateCharacter, updateUserProfile, apiConfig, apiPresets, getCharacterApiConfig, availableModels, addApiPreset, closeApp, openApp, customThemes, addCustomTheme, removeCustomTheme, addWorldbook, updateTheme, saveAppearancePreset, addToast, showError, userProfile, lastMsgTimestamp, groups, characterGroups, clearUnread, unreadMessages, realtimeConfig, memoryPalaceConfig, updateMemoryPalaceConfig, remoteVectorConfig, syncEmotionApiToAllCharacters, theme: baseOsTheme, proactiveComposingChars, openDateWithChar } = useOS();
     const osTheme = useMemo(()=>resolveDecorationTheme(baseOsTheme,characters.find(c=>c.id===activeCharacterId)||characters[0]),[baseOsTheme,characters,activeCharacterId]);
     const isProactiveComposing = !!(activeCharacterId && proactiveComposingChars[activeCharacterId]);
     const localDateKey = useLocalDateKey();
@@ -187,6 +189,7 @@ const Chat: React.FC = () => {
     const historyJumpUnlockTimerRef = useRef<number | null>(null);
     const historyWindowScrollEnabledRef = useRef(false);
     const activeCharIdRef = useRef(activeCharacterId);
+    const openingInitPromisesRef = useRef(new Map<string, Promise<void>>());
     // 流式预览接棒过的正式消息在当前会话内始终跳过入场动画，避免后续 DB 刷新时动画类又被加回来。
     const streamPreviewHandoverIdsRef = useRef<Set<number>>(new Set());
     const registerStreamPreviewHandover = useCallback((charId: string, messageIds: number[]) => {
@@ -260,6 +263,7 @@ const Chat: React.FC = () => {
     // --- Multi-Select State ---
     const [selectionMode, setSelectionMode] = useState(false);
     const [showHistoryCleanup, setShowHistoryCleanup] = useState(false);
+    const [showHistorySearch, setShowHistorySearch] = useState(false);
     useEffect(() => setShowHistoryCleanup(false), [activeCharacterId]);
     const [selectedMsgIds, setSelectedMsgIds] = useState<Set<number>>(new Set());
     // 思维链是 metadata.thinkingChain，没有独立 id，所以用宿主消息 id 作为键，
@@ -288,6 +292,7 @@ const Chat: React.FC = () => {
     const [showingTargetIds, setShowingTargetIds] = useState<Set<number>>(new Set());
 
     const char = characters.find(c => c.id === activeCharacterId) || characters[0];
+    const characterApiConfig = useMemo(() => char ? getCharacterApiConfig(char) : apiConfig, [char, getCharacterApiConfig, apiConfig]);
     const memoryRepairRound = useMemo(() => {
         let assistantIndex = -1;
         for (let i = messages.length - 1; i >= 0; i--) {
@@ -408,6 +413,7 @@ const Chat: React.FC = () => {
         char,
         userProfile,
         apiConfig,
+        apiPresets,
         groups,
         emojis: aiVisibleEmojis,
         categories: visibleCategories,
@@ -545,11 +551,11 @@ const Chat: React.FC = () => {
     // 以前不查状态码、失败静默吞掉，翻译一次拿不到就永远空着（「外语语音没翻译」主因）。
     const llmTranslate = async (systemPrompt: string, text: string): Promise<string> => {
         const attempt = async (): Promise<string> => {
-            const res = await fetch(`${apiConfig.baseUrl}/chat/completions`, {
+            const res = await fetch(`${characterApiConfig.baseUrl}/chat/completions`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiConfig.apiKey}` },
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${characterApiConfig.apiKey}` },
                 body: JSON.stringify({
-                    model: apiConfig.model,
+                    model: characterApiConfig.model,
                     messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: text }],
                     temperature: 0.3,
                 }),
@@ -965,6 +971,33 @@ const Chat: React.FC = () => {
         if (!activeCharacterId) return;
 
         const charIdAtStart = activeCharacterId;
+        const currentChar = charRef.current;
+        const opening = currentChar?.id === charIdAtStart ? currentChar.chatOpening?.trim() : '';
+        if (opening) {
+            let initialization = openingInitPromisesRef.current.get(charIdAtStart);
+            if (!initialization) {
+                initialization = (async () => {
+                    const existing = await DB.getMessagesByCharId(charIdAtStart, true);
+                    if (!existing.some(message => message.role === 'user' || message.role === 'assistant')) {
+                        const openingBubbles = opening.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+                        for (const content of openingBubbles) {
+                            await DB.saveMessage({ charId: charIdAtStart, role: 'assistant', type: 'text', content });
+                        }
+                    }
+                })();
+                openingInitPromisesRef.current.set(charIdAtStart, initialization);
+            }
+            try {
+                await initialization;
+            } catch (error) {
+                console.warn('[Chat] Could not save configured opening line:', error);
+            } finally {
+                if (openingInitPromisesRef.current.get(charIdAtStart) === initialization) {
+                    openingInitPromisesRef.current.delete(charIdAtStart);
+                }
+            }
+            if (activeCharIdRef.current !== charIdAtStart) return;
+        }
         // 倒序游标先过滤展示范围再取最近 N 条。缓冲只用于判断是否还有历史，
         // 不能靠固定缓冲抵消见面/通话记录：它们可能连续几百条，挤掉真正的私聊。
         const fetchLimit = requestedVisibleCount >= 100000 ? requestedVisibleCount : requestedVisibleCount + 16;
@@ -1098,7 +1131,7 @@ const Chat: React.FC = () => {
     // Auto-generate daily schedule (fire-and-forget on chat load)
     // 总开关关闭时完全跳过：不查询 DB、不调用副 API、不跑兜底
     useEffect(() => {
-        if (!char || !apiConfig.apiKey) return;
+        if (!char || !characterApiConfig.apiKey) return;
         if (!isScheduleFeatureOn(char)) {
             setScheduleData(null);
             return;
@@ -1386,7 +1419,7 @@ const Chat: React.FC = () => {
             : null;
 
         const msgPayload: any = { charId: char.id, role: 'user', type, content: storedContent, metadata };
-        
+
         if (replyTarget) {
             msgPayload.replyTo = {
                 // 引用图片 / 表情时快照存 '[图片]' 之类的占位符，不把令牌原样带进这条消息
@@ -2021,7 +2054,7 @@ const Chat: React.FC = () => {
         setTheaterSlotIdx(index);
         setIsTheaterGenerating(true);
         try {
-            const updated = await generateSlotTheater(char, userProfile, scheduleData, index, apiConfig, forceRegenerate);
+            const updated = await generateSlotTheater(char, userProfile, scheduleData, index, characterApiConfig, forceRegenerate);
             if (updated) {
                 setScheduleData(updated);
             } else {
@@ -2073,7 +2106,7 @@ const Chat: React.FC = () => {
         if (!targetChar || isScheduleGenerating) return;
         setIsScheduleGenerating(true);
         try {
-            const result = await generateDailyScheduleForChar(targetChar, userProfile, apiConfig, forceRegenerate);
+            const result = await generateDailyScheduleForChar(targetChar, userProfile, getCharacterApiConfig(targetChar), forceRegenerate);
             if (result) {
                 setScheduleData(result);
                 // 跨天后台重新生成也要刷云端：不刷的话角色到点照着昨天的作息表说话
@@ -2097,7 +2130,7 @@ const Chat: React.FC = () => {
         if (!isScheduleFeatureOn(updatedChar)) return;
         setIsScheduleGenerating(true);
         try {
-            const result = await generateDailyScheduleForChar(updatedChar, userProfile, apiConfig, true);
+            const result = await generateDailyScheduleForChar(updatedChar, userProfile, getCharacterApiConfig(updatedChar), true);
             if (result) setScheduleData(result);
         } catch (e) {
             console.error('[Schedule] Regeneration after style change failed:', e);
@@ -2691,7 +2724,7 @@ const Chat: React.FC = () => {
     };
 
     const handleFullArchive = async () => {
-        if (!apiConfig.apiKey || !char) {
+        if (!characterApiConfig.apiKey || !char) {
             addToast('请先配置 API Key', 'error');
             return;
         }
@@ -2740,11 +2773,11 @@ const Chat: React.FC = () => {
                 prompt = prompt.replace(/\$\{userProfile\.name\}/g, userProfile.name);
                 prompt = prompt.replace(/\$\{rawLog.*?\}/g, rawLog.substring(0, 200000));
 
-                const response = await fetch(`${apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+                const response = await fetch(`${characterApiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.apiKey}` },
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${characterApiConfig.apiKey}` },
                     body: JSON.stringify({
-                        model: apiConfig.model,
+                        model: characterApiConfig.model,
                         messages: [{ role: "user", content: prompt }],
                         temperature: 0.5,
                         max_tokens: 8000 
@@ -3703,6 +3736,7 @@ const Chat: React.FC = () => {
              )}
 
              {showHistoryCleanup && <ChatHistoryCleanupModal key={`history-cleanup:${char.id}`} character={char} onClose={() => setShowHistoryCleanup(false)} onDeleted={handleHistoryCleanupDone} />}
+             {char && <ChatHistorySearchModal isOpen={showHistorySearch} character={char} onClose={() => setShowHistorySearch(false)} onJump={(messageId) => { setShowHistorySearch(false); void handleJumpToMessageInChat(messageId); }} />}
              {emojiExport && <EmojiExportDialog {...emojiExport} onClose={() => setEmojiExport(null)} />}
             <ChatModals
                 modalType={modalType} setModalType={setModalType}
@@ -3712,6 +3746,15 @@ const Chat: React.FC = () => {
                 settingsContextLimit={settingsContextLimit} setSettingsContextLimit={setSettingsContextLimit}
                 settingsContextRangeMode={settingsContextRangeMode} setSettingsContextRangeMode={setSettingsContextRangeMode}
                 settingsHideSysLogs={settingsHideSysLogs} setSettingsHideSysLogs={setSettingsHideSysLogs}
+                onTogglePromptCategory={(category) => {
+                    const fieldByCategory = {
+                        replyStyle: 'chatReplyStyleEnabled',
+                        emotionResponse: 'chatEmotionResponseRulesEnabled',
+                        feedbackResponse: 'chatFeedbackResponseRulesEnabled',
+                    } as const;
+                    const field = fieldByCategory[category];
+                    updateCharacter(char.id, { [field]: char[field] === false });
+                }}
                 settingsInputPreferences={settingsInputPreferences} setSettingsInputPreferences={setSettingsInputPreferences}
                 contextSuiteAnyEnabled={contextSuiteAnyEnabled}
                 contextSuiteAllEnabled={contextSuiteAllEnabled}
@@ -3860,6 +3903,7 @@ const Chat: React.FC = () => {
                 chromeStyle={osTheme.chatChromeStyle}
                 hideBuffs={osTheme.chatHideHeaderBuffs}
                 acnh={acnh}
+                extraAction={{ label: '搜索聊天记录', icon: <MagnifyingGlass className="w-5 h-5" weight="bold" />, onClick: () => setShowHistorySearch(true) }}
              />
 
             {/* 认知消化结果弹窗 — 全屏玻璃拟态 */}
@@ -4359,6 +4403,7 @@ const Chat: React.FC = () => {
                     onClose={() => setShowThinkingChainModal(false)}
                     value={{
                         enabled: !!(char as any).showThinkingChain,
+                        promptEnabled: char.thinkingPromptEnabled !== false,
                         styleId: ((char as any).thinkingChainStyle as any) || 'echo',
                         customColors: {
                             bg: (char as any).thinkingChainCustomColors?.bg || '#1f2937',
@@ -4371,6 +4416,7 @@ const Chat: React.FC = () => {
                     onChange={(next) => {
                         const patch: any = {};
                         if (next.enabled !== undefined) patch.showThinkingChain = next.enabled;
+                        if (next.promptEnabled !== undefined) patch.thinkingPromptEnabled = next.promptEnabled;
                         if (next.styleId !== undefined) patch.thinkingChainStyle = next.styleId;
                         if (next.customColors !== undefined) patch.thinkingChainCustomColors = next.customColors;
                         if (next.customPrompt !== undefined) patch.thinkingChainCustomPrompt = next.customPrompt;
