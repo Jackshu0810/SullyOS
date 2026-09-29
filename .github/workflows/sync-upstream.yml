@@ -1,0 +1,41 @@
+name: Sync upstream SullyOS
+
+on:
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream-master
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out fork master
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Fetch upstream master
+        run: |
+          git remote add upstream https://github.com/qegj567-cloud/SullyOS.git
+          git fetch upstream master --no-tags
+
+      - name: Merge upstream without overwriting fork changes
+        run: |
+          if git merge-base --is-ancestor upstream/master HEAD; then
+            echo "Fork already includes the latest upstream commits."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git merge --no-edit upstream/master
+
+      - name: Push synced master
+        run: git push origin HEAD:master
