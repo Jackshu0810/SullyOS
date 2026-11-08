@@ -1,8 +1,6 @@
 name: Sync upstream SullyOS
 
 on:
-  schedule:
-    - cron: "23 4 * * *"
   workflow_dispatch:
 
 permissions:
@@ -14,6 +12,8 @@ concurrency:
 
 jobs:
   sync:
+    # Retired public fork. Updates are maintained in SullyOS-personal.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out fork master
